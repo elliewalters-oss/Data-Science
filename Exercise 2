@@ -1,0 +1,814 @@
+# Exercise 2
+# Lorenzo Cappello, Alessandro Ciancetta, Alberto Santini
+
+library(readr)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(caret)
+library(recipes)
+library(vip)
+library(randomForest)
+library(glmnet)
+library(pROC)
+library(FNN)
+
+# Dataset 1: Chicago data
+# The dataset chicago contains housing values in 506 suburbs of Chicago
+#
+# The dataset contains the following information:
+#
+# crim: per capita crime rate by town.
+# lak: dummy variable (= 1 if close to the lake; 0 otherwise).
+# age: proportion of owner-occupied units built prior to 1940.
+# minute_to_center: avg commute length to downtown
+# happy: a happyness index in each neighorhood.
+# lstat: lower status of the population (percent).
+# medv: median value of owner-occupied homes in $1000s.
+# We are interested in using this dataset to create a predictive model for the variable medv
+
+chicago <- read_csv('https://raw.githubusercontent.com/barcelonagse-datascience/academic_files/master/data/chicago_medv.csv')
+chicago <- chicago[,-1]
+head(chicago)
+## # A tibble: 6 x 7
+##    medv    crim   age lstat   lak minute_to_center  happy
+##   <dbl>   <dbl> <dbl> <dbl> <dbl>            <dbl>  <dbl>
+## 1  25.7 0.00632  65.2  4.98     0             2.95  3.22 
+## 2  26.1 0.0273   78.9  9.14     0             4.73  0.771
+## 3  38.3 0.0273   61.1  4.03     0            NA    NA    
+## 4  60.8 0.0324   45.8  2.94     1            NA     4.30 
+## 5  40.3 0.0690   54.2  5.33     0             4.54  0.155
+## 6  47.7 0.0298   58.7  5.21     1             9.74  0.361
+
+# Question 1
+# Develop a strategy to deal with missing data
+#
+# do the exploratory steps that will help you with the analysis
+# comment on what you done
+# comment on the choices you have done
+# Provide detailed analysis on the steps you have done
+
+na_cols <- colMeans(is.na(chicago)) * 100 # times 100 to get percentage
+na_cols
+##             medv             crim              age            lstat 
+##         0.000000         0.000000         0.000000         2.964427 
+##              lak minute_to_center            happy 
+##         0.000000        19.960474        19.960474
+
+# Three variables with missing values. Let's look at some descriptives
+
+cor(data.frame(chicago$medv,
+               chicago$lstat,
+               chicago$happy,
+               chicago$minute_to_center),
+    use="complete.obs")
+##                          chicago.medv chicago.lstat chicago.happy
+## chicago.medv               1.00000000   -0.59034538   -0.04379786
+## chicago.lstat             -0.59034538    1.00000000    0.01734670
+## chicago.happy             -0.04379786    0.01734670    1.00000000
+## chicago.minute_to_center   0.69369456   -0.09118714   -0.03801928
+##                          chicago.minute_to_center
+## chicago.medv                           0.69369456
+## chicago.lstat                         -0.09118714
+## chicago.happy                         -0.03801928
+## chicago.minute_to_center               1.00000000
+
+# happy does not seem very important I get rid of it
+
+chicago <- chicago |> 
+  dplyr::select(-happy)
+
+# lstat may be important (high correlation). I remove the rows since I am missing a few
+
+chicago <- chicago[!is.na(chicago$lstat),]
+dim(chicago)
+## [1] 491   6
+
+# minute_to_center looks relevant. I check the relationship with other variables
+
+correlations <- cor(chicago, use = "complete.obs")
+correlations["minute_to_center", ]
+##             medv             crim              age            lstat 
+##       0.69126288       0.01137991       0.03732485      -0.09577949 
+##              lak minute_to_center 
+##       0.93622490       1.00000000
+
+# High correlation with lak and medv (which is what I will predict)
+
+hist(chicago$minute_to_center)
+
+# strong binary structure. Let's investigate if it is due to lak
+
+chicago |> 
+  group_by(lak) |> 
+  summarize(mean_min=mean(minute_to_center,na.rm = T))
+## # A tibble: 2 x 2
+##     lak mean_min
+##   <dbl>    <dbl>
+## 1     0     3.90
+## 2     1    10.0
+
+# strong effect by group. We use mean data imputation
+
+chicago <- chicago |> 
+  group_by(lak) |> 
+  mutate(
+    minute_to_center = ifelse(
+      is.na(minute_to_center),
+      mean(minute_to_center, na.rm = TRUE),
+      minute_to_center
+    )
+  ) |> 
+  ungroup()
+
+# sanity_check
+na_cols <- colMeans(is.na(chicago)) * 100 # times 100 to get percentage
+na_cols
+##             medv             crim              age            lstat 
+##                0                0                0                0 
+##              lak minute_to_center 
+##                0                0
+
+n <- nrow(chicago)
+
+# Question 2
+# Create a variable that bin the median value of owner-occupied homes into two category (you can choose how to do a split). Call it medv_cat
+# Build two logistic regression classifier: one that includes all variable at disposal, a second one with a subset of variables of your choice
+# Evaluate the perfomance of the two classifiers built using appropriate metrics
+
+medv_cat <- factor(chicago$medv > median(chicago$medv))
+table(medv_cat)
+## medv_cat
+## FALSE  TRUE 
+##   246   245
+
+# in light of estimating the predictive performance, I split the sample. Sample size is large enough, I don't need cv
+id_train <- sample(1:n,floor(0.7*n))
+X <- chicago |>  dplyr::select(-medv)
+X$medv_cat <- medv_cat
+X_train <- X[id_train,]
+X_test  <- X[setdiff(1:n,id_train),]
+dim(X_train)
+## [1] 343   6
+
+dim(X_test)
+## [1] 148   6
+
+na_cols <- colMeans(is.na(X_test)) * 100 # times 100 to get percentage
+na_cols
+##             crim              age            lstat              lak 
+##                0                0                0                0 
+## minute_to_center         medv_cat 
+##                0                0
+
+# logistic regression
+logit_all  <- glm(medv_cat ~ . , data = X_train , family = binomial(logit))
+summary(logit_all)
+## 
+## Call:
+## glm(formula = medv_cat ~ ., family = binomial(logit), data = X_train)
+## 
+## Deviance Residuals: 
+##     Min       1Q   Median       3Q      Max  
+## -2.0061  -0.3853   0.0009   0.4165   3.6509  
+## 
+## Coefficients:
+##                   Estimate Std. Error z value Pr(>|z|)    
+## (Intercept)      -0.974522   0.853776  -1.141   0.2537    
+## crim             -0.114255   0.045899  -2.489   0.0128 *  
+## age               0.002118   0.007454   0.284   0.7763    
+## lstat            -0.328043   0.053087  -6.179 6.44e-10 ***
+## lak               6.662561   2.742012   2.430   0.0151 *  
+## minute_to_center  0.982849   0.221538   4.436 9.14e-06 ***
+## ---
+## Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1
+## 
+## (Dispersion parameter for binomial family taken to be 1)
+## 
+##     Null deviance: 475.15  on 342  degrees of freedom
+## Residual deviance: 206.73  on 337  degrees of freedom
+## AIC: 218.73
+## 
+## Number of Fisher Scoring iterations: 8
+
+# logistic regression
+logit_sub  <- glm(medv_cat ~ -1+ minute_to_center + lstat, data = X_train , family = binomial(logit))
+summary(logit_sub)
+## 
+## Call:
+## glm(formula = medv_cat ~ -1 + minute_to_center + lstat, family = binomial(logit), 
+##     data = X_train)
+## 
+## Deviance Residuals: 
+##     Min       1Q   Median       3Q      Max  
+## -2.1372  -0.4906   0.0285   0.4584   3.5894  
+## 
+## Coefficients:
+##                  Estimate Std. Error z value Pr(>|z|)    
+## minute_to_center  0.86507    0.09921   8.720   <2e-16 ***
+## lstat            -0.33761    0.03902  -8.653   <2e-16 ***
+## ---
+## Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1
+## 
+## (Dispersion parameter for binomial family taken to be 1)
+## 
+##     Null deviance: 475.50  on 343  degrees of freedom
+## Residual deviance: 234.04  on 341  degrees of freedom
+## AIC: 238.04
+## 
+## Number of Fisher Scoring iterations: 6
+
+predict_all <- predict(logit_all, newdata = X_test, type = "response")
+predict_sub <- predict(logit_sub, newdata = X_test, type = "response")
+
+# I first look at confusion matrices. I convert estimate of the probabilities into point prediction using an arbitrary threshold 1/2
+
+# all model
+point_pred_all <- predict_all>1/2
+cm  <- data.frame(table('True'=as.integer(X_test$medv_cat),
+                        'Predicted'=as.integer(point_pred_all))) |>  
+  group_by(True) |> 
+  mutate(Realized_pct = Freq/sum(Freq))
+cm
+## # A tibble: 4 x 4
+## # Groups:   True [2]
+##   True  Predicted  Freq Realized_pct
+##   <fct> <fct>     <int>        <dbl>
+## 1 1     0            71       0.888 
+## 2 2     0             5       0.0735
+## 3 1     1             9       0.112 
+## 4 2     1            63       0.926
+
+ggplot(data = cm, mapping = aes(x = ordered(True,c(1,0)), y = Predicted, fill=Realized_pct)) +  geom_tile() +
+     geom_text(aes(label=round(Realized_pct,2)),col='white') + xlab('True')
+
+# sub model
+point_pred_sub <- predict_sub>1/2
+cm  <- data.frame(table('True'=as.integer(X_test$medv_cat),'Predicted'=as.integer(point_pred_sub)))
+library(ggplot2)
+cm  <- cm %>% group_by(True) %>% mutate(Realized_pct = Freq/sum(Freq))
+cm
+## # A tibble: 4 x 4
+## # Groups:   True [2]
+##   True  Predicted  Freq Realized_pct
+##   <fct> <fct>     <int>        <dbl>
+## 1 1     0            68       0.85  
+## 2 2     0             5       0.0735
+## 3 1     1            12       0.15  
+## 4 2     1            63       0.926
+
+ggplot(data = cm, mapping = aes(x = ordered(True,c(1,0)), y = Predicted, fill=Realized_pct)) +  
+  geom_tile() +
+  geom_text(aes(label=round(Realized_pct,2)),col='white') + 
+  xlab('True')
+
+# Performance of the sub model is just slightly worst. Still, it is a more parsimonious model. Let's look at ROC curve
+
+roc_all <- roc(X_test$medv_cat, predict_all)
+auc_all <- round(auc(X_test$medv_cat, predict_all),4)
+auc_all
+## [1] 0.9649
+
+roc_sub <- roc(X_test$medv_cat, predict_sub)
+auc_sub <- round(auc(X_test$medv_cat, predict_sub),4)
+auc_sub
+## [1] 0.9614
+
+# Little difference between the two in terms of AUC. Let's look at ROC curves
+
+plot(y = roc_all$sensitivities,
+     x = 1-roc_all$specificities,
+     t = 'l', 
+     col='darkblue',
+     lwd=2,
+     xlab='False Positive Rate',
+     ylab='True Positive Rate')
+lines(y = roc_sub$sensitivities, 
+      x = 1-roc_sub$specificities,
+      col = 'firebrick',
+      lwd = 2)
+abline(a = 0, b = 1, lty = 2, lwd = 2)
+grid()
+legend('bottomright',c(sprintf(" All AUC: %.3f",auc_all),
+                       sprintf(" Sub AUC: %.3f", auc_sub),
+                       'Random Guess'),
+       lty=c(1,1,2),lwd=4,col=c('darkblue','firebrick','black'))
+box()
+
+# The two models are almost indistinguishable. So, far we should probably stick to the smallest one. There is not even a regime (in terms of TPR/FPR) in which the model with all covariates outperforms clearly the other one.
+
+# Question 3
+# Fit a logistic regression that helps you understand which variable matters the most from a predictive standpoint
+# Estimate the predictive performance
+# Compare the the models built with those done in the previous step
+
+# So, we choose λ with CV on the training data, so I have the test data to compare the best lasso model with the regression
+
+cv_model <- cv.glmnet(as.matrix(X_train[,-6]), 
+                      X_train$medv_cat, 
+                      family = "binomial", 
+                      alpha = 1) # LASSO
+lasso_model_min <- glmnet(as.matrix(X_train[,-6]), 
+                          X_train$medv_cat, 
+                          family = "binomial", 
+                          alpha = 1, 
+                          lambda = cv_model$lambda.min)
+predict_lasso_min <- 1 - predict(lasso_model_min, newx = as.matrix(X_test[,-6]), type = "response")
+
+# lassso
+point_pred_sub <- predict_lasso_min>1/2
+cm  <- data.frame(table('True'     = as.integer(X_test$medv_cat),
+                        'Predicted'= as.integer(point_pred_sub))) |> 
+  group_by(True) |> 
+  mutate(Realized_pct = Freq/sum(Freq))
+cm
+## # A tibble: 4 x 4
+## # Groups:   True [2]
+##   True  Predicted  Freq Realized_pct
+##   <fct> <fct>     <int>        <dbl>
+## 1 1     0             9       0.112 
+## 2 2     0            63       0.926 
+## 3 1     1            71       0.888 
+## 4 2     1             5       0.0735
+
+ggplot(data = cm, mapping = aes(x = ordered(True,c(1,0)), y = Predicted, fill=Realized_pct)) +  
+  geom_tile() +
+  geom_text(aes(label=round(Realized_pct,2)),col='white') + 
+  xlab('True')
+
+roc_lasso <- roc(X_test$medv_cat, predict_lasso_min)
+auc_lasso <- round(auc(X_test$medv_cat, predict_lasso_min),4)
+auc_lasso
+## [1] 0.9656
+
+plot(y = roc_all$sensitivities,
+     x = 1 - roc_all$specificities,
+     t = 'l',
+     col = 'darkblue',
+     lwd = 2,
+     xlab = 'False Positive Rate',
+     ylab = 'True Positive Rate')
+lines(y = roc_sub$sensitivities, 
+      x = 1-roc_sub$specificities,
+      col = 'firebrick',
+      lwd = 2)
+lines(y = roc_lasso$sensitivities, 
+      x = 1-roc_lasso$specificities,
+      col = 'green',
+      lwd = 2)
+abline(a = 0, b = 1, lty = 2, lwd = 2)
+grid()
+legend('bottomright',c(sprintf(" All AUC: %.3f",auc_all),
+                       sprintf(" Sub AUC: %.3f", auc_sub),
+                       sprintf(" LASSO AUC: %.3f", auc_lasso),
+                       'Random Guess'),
+       lty=c(1,1,2),lwd=4,col=c('darkblue','firebrick','green','black'))
+box()
+
+# Again, the model is almost identical. Let's check what this model is
+
+lasso_coef <- as.matrix(coef(lasso_model_min, s='lambda.min'))
+lasso_coef
+##                             s1
+## (Intercept)      -1.007831e+00
+## crim             -6.376815e-02
+## age              -5.005956e-05
+## lstat            -2.793775e-01
+## lak               3.512760e+00
+## minute_to_center  9.011746e-01
+
+# This model is more parsimonous that the one with all covariates, but it still includes more than the parsimonous one. I guess we got "lucky" in picking a very good small model. It would be interesting to look also at the lasso 1se model.
+
+# Question 4
+# Consider again the variable medv in its original form (aka continuous). Compare two methods that allows you to score/evaluate the importance of the variables from prediction. Comment on the output
+
+# I will compare LASSO output with cv and random forest
+X_chicago <- chicago %>% dplyr::select(-medv)
+rf_medv   <- randomForest(x = X_chicago, y = chicago$medv)
+lass_medv <- cv.glmnet(as.matrix(X_chicago), chicago$medv, family = "gaussian", alpha = 1,intercept=FALSE)
+
+# Let's print the var importance of the two methods
+lasso_medv_min  <- glmnet(as.matrix(X_chicago), chicago$medv, family = "gaussian", alpha = 1, lambda = lass_medv$lambda.min,intercept=FALSE)
+lasso_coef_medv <- as.matrix(coef(lasso_medv_min, s='lambda.min'))
+lasso_coef_medv
+##                           s1
+## (Intercept)        0.0000000
+## crim              -0.1566289
+## age                0.1008825
+## lstat             -0.8251940
+## lak              -23.9349952
+## minute_to_center   7.2120481
+
+var_imp  <- rf_medv$importance/max(rf_medv$importance)
+var_imp[order(var_imp,decreasing = TRUE),]
+## minute_to_center            lstat              lak             crim 
+##        1.0000000        0.8995344        0.7282157        0.3831312 
+##              age 
+##        0.2629949
+
+# Quite some difference! Lak is very important in the lasso (highest coefficient). while RF see minute_to_center as the most important one and lstat second.
+#
+# One can start looking at some of the mean functions to make more sense of these results
+
+# Question 5
+# Compare the prediction for medv that can be obtained by two nonlinear methods of your choice
+
+# To compare I need to split the data into training and test (I could use the same as before as well but it I did not have medv)
+id_train2 <- sample(1:n,floor(0.7*n))
+X_train2  <- chicago[id_train2,]
+X_test2   <- chicago[setdiff(1:n,id_train2),]
+dim(X_train2)
+## [1] 343   6
+
+dim(X_test2)
+## [1] 148   6
+
+colnames(X_train2)
+## [1] "medv"             "crim"             "age"              "lstat"           
+## [5] "lak"              "minute_to_center"
+
+# select best K with CV
+X_train2 <- as.data.frame(X_train2)
+X_test2 <- as.data.frame(X_test2)
+kk <- seq(1, 15)
+r2_cv <- rep(0, length(kk))
+for (k in kk) {
+  r2_cv[k] <- knn.reg(X_train2[, -1], y = X_train2[, 1], k = k)$R2Pred
+}
+
+# higher R squared better fit
+kstar <- which.max(r2_cv)
+knn_t <- knn.reg(X_train2[, -1], y = X_train2[, 1], k = kstar)
+max_features <- seq(1, 5)
+mse_feat <- rep(0, 5)
+for (max_f in max_features) {
+  mse_feat[max_f] <- tail(randomForest(x = X_train2[, -1], y = X_train2[, 1], mtry =
+                                         max_f)$mse, 1)
+}
+mstar <- which.min(mse_feat)
+mstar
+## [1] 4
+
+# 
+rf_t <- randomForest(x = X_train2[, -1], y = X_train2[, 1], mtry = mstar)
+colnames(X_test2)
+## [1] "medv"             "crim"             "age"              "lstat"           
+## [5] "lak"              "minute_to_center"
+
+# I compare MSE in the test set
+pred_rf <- predict(rf_t, X_test2[,-1])
+knn_t <- knn.reg(X_train2[, -1],
+                 y = X_train2[, 1],
+                 test = X_test2[, -1],
+                 k = kstar)
+pred_knn <- knn_t$pred
+mean((X_test2[, 1] - pred_rf) ^ 2)
+## [1] 32.83458
+
+mean((X_test2[, 1] - pred_knn) ^ 2)
+## [1] 49.34468
+
+# Question 6
+# Build a classifier with kNN and randomforest for the variable medv_cat. This involves devising a strategy to choose the hyperparameter. randomforest has several: just tune one of your choice.
+# Compare the performance of all classifiers built. Comment on your results.
+
+# I can use again X_test and X_train (not without the one) I repeat same step as before, now for classification and with mdev_cat
+# All the code is copied and pasted from previous questions with tiny modifications
+colnames(X_train)
+## [1] "crim"             "age"              "lstat"            "lak"             
+## [5] "minute_to_center" "medv_cat"
+
+# Select k given the best classification rate (it is a suboptimal measure but it is fast to check)
+X_train <- as.data.frame(X_train)
+X_test <- as.data.frame(X_test)
+knn_class <- knn.cv(X_train[,-6],  factor(X_train[,6]), k = 4)
+
+# search
+kk <- seq(1, 15)
+misclass_cv <- rep(0, length(kk))
+for (k in kk) {
+  pred_knn <- knn_class <- knn.cv(X_train[, -6], factor(X_train[, 6]), k = k)
+  misclass_cv[k] <- mean(pred_knn != factor(X_train[, 6]))
+}
+
+# higher R squared better fit
+kstar <- which.min(misclass_cv)
+misclass_cv
+##  [1] 0.2011662 0.2361516 0.1836735 0.2390671 0.2069971 0.2361516 0.2215743
+##  [8] 0.2332362 0.2128280 0.2303207 0.2332362 0.2448980 0.2448980 0.2507289
+## [15] 0.2507289
+
+rf  <- randomForest(x = X_train[, -6],
+                    y = factor(X_train[, 6]),
+                    mtry = 3)
+head(rf$err.rate)
+##            OOB     FALSE      TRUE
+## [1,] 0.2295082 0.2537313 0.2000000
+## [2,] 0.2067308 0.2285714 0.1844660
+## [3,] 0.2088353 0.2352941 0.1846154
+## [4,] 0.2147887 0.2446043 0.1862069
+## [5,] 0.1887417 0.2066667 0.1710526
+## [6,] 0.2044025 0.1812500 0.2278481
+
+max_features <- seq(1, 5)
+oob_acc <- rep(0, 5)
+for (max_f in max_features) {
+  # fit the model
+  rf  <- randomForest(x = X_train[, -6],
+                      y = factor(X_train[, 6]),
+                      mtry = max_f)
+  # compute accuracy
+  oob_acc[max_f]  <- 1 - tail(rf$err.rate[, 'OOB'], 1)
+}
+max_f_star <- which.max(oob_acc)
+max_f_star
+## [1] 1
+
+# best RF
+RFTuned <- randomForest(x = X_train[, -6],
+                        y = factor(X_train[, 6]),
+                        mtry = max_f_star)
+RFPred  <- predict(RFTuned, newdata = X_test)
+RFProb  <- predict(RFTuned, newdata = X_test, type = 'prob')
+
+# best Knn
+kNN_Test <- knn(
+  test = X_test[, -6],
+  train = X_train[, -6],
+  cl = factor(X_train[, 6]),
+  k = kstar,
+  prob = TRUE
+)
+kNN_probs <- attributes(kNN_Test)$prob
+knn_y_probs  <- ifelse(as.numeric(as.logical(levels(kNN_Test)[kNN_Test])) == 1, 
+                       kNN_probs, 
+                       1 - kNN_probs)
+kNN_roc <- roc(factor(X_test[, 6]), knn_y_probs)
+kNN_auc <- round(auc(factor(X_test[, 6]), knn_y_probs), 4)
+kNN_auc
+## [1] 0.9165
+
+RF_roc <- roc(factor(X_test[, 6]), RFProb[, 2])
+RF_auc <- round(auc(factor(X_test[, 6]), RFProb[, 2]), 4)
+RF_auc
+## [1] 0.9562
+
+# note, I only plot the sub model, since it was the best
+plot(y = RF_roc$sensitivities,
+     x = 1 - RF_roc$specificities,
+     t = 'l', 
+     col='darkblue',
+     lwd = 2,
+     xlab = 'False Positive Rate',
+     ylab = 'True Positive Rate')
+lines(y = roc_sub$sensitivities, 
+      x = 1-roc_sub$specificities,
+      col = 'firebrick',
+      lwd = 2)
+lines(y = kNN_roc$sensitivities, 
+      x = 1 - kNN_roc$specificities,
+      col = 'green',
+      lwd = 2)
+
+abline(a = 0,
+       b = 1,
+       lty = 2,
+       lwd = 2)
+grid()
+legend('bottomright',c(
+    sprintf(" RF AUC: %.3f", RF_auc),
+    sprintf(" Sub AUC: %.3f", auc_sub),
+    sprintf(" kNN AUC: %.3f", kNN_auc),
+    'Random Guess'
+  ),
+  lty = c(1, 1, 2),
+  lwd = 4,
+  col = c('darkblue', 'firebrick', 'green', 'black')
+)
+box()
+
+# knn is definetly worst in this example. Maybe I could have trained better? The comparison between RF and Sub is interesting. I would pick Sub if ….
+
+# Dataset 2: ER data
+# The dataset ER Visits contains data on the daily visits to the ER in a hospital in Barcelona.
+#
+# The dataset contains the following information:
+#
+# ERVisits: number of daily visits to the ER
+# Day of the year (1-365)
+# Year (2023 or 2024)
+# DayofWeek (Mon to Sun)
+# Holiday: binary indcator taking the value of 1 for holidays
+# Temperature: average daily temperature
+# Weather (Sunny, Cloudy or Rainy)
+# We are interested in using this dataset to create a predictive model for the variable ERVisits
+
+# Question 7
+# Develop a strategy to deal with missing data and outliers. This includes 
+# - doing the exploratory steps that will help you with the analysis 
+# - commenting on what you done 
+# - commenting on the choices you have done
+
+ER.data <- read.csv('https://raw.githubusercontent.com/barcelonagse-datascience/academic_files/master/data/er_visits.csv')
+head(ER.data)
+##   ERVisits Day Year TimeOfDay DayOfWeek Temperature   Humidity Weather Holiday
+## 1       NA   1 2023        11       Mon        20.8 0.40978311  Cloudy       0
+## 2       73   2 2023        11       Tue        23.6 0.59700047   Sunny       0
+## 3       62   3 2023        20       Wed        26.8 0.76638398   Sunny       0
+## 4       64   4 2023         5       Thu        22.5 0.50305346  Cloudy       0
+## 5       74   5 2023        15       Fri        13.5 0.07392654   Sunny       0
+## 6      111   6 2023         9       Sat        31.2 0.88903183   Sunny       0
+##   Event    Traffic
+## 1     0  0.1464085
+## 2     0  1.5653440
+## 3     0  1.3824094
+## 4     0  1.0812223
+## 5     0  3.7695464
+## 6     0 20.6373623
+
+# remove records containing NAs in the outcome variable
+ER.data <- ER.data |> filter(!is.na(ERVisits))
+
+# Outliers
+boxplot(ER.data[, 'Temperature'], horizontal = TRUE)
+
+boxplot(ER.data[, 'Traffic'], horizontal = TRUE)
+
+# Temperature
+ER.data <- ER.data |> 
+  mutate(Temperature = if_else(Temperature >= 55, median(Temperature), Temperature)) |> 
+  mutate(Traffic = log(1 + Traffic))
+
+# Traffic
+# careful with logs
+boxplot(ER.data[, 'Temperature'], horizontal = TRUE)
+
+boxplot(ER.data[, 'Traffic'], horizontal = TRUE)
+
+# Question 8
+# Does your dataset require additional features to better predict the variable of interest that can be constructed from the dataset? If so, which additional features would you add to the data? Explain your answer. Add the features that you believe could be useful for prediction.
+
+# More visits at different times
+boxplot(ER.data$ERVisits ~ ER.data$TimeOfDay)
+
+# More visits with extreme temperatures
+ER.data <- ER.data |> 
+  mutate(Sunny_and_Hot = if_else(Weather == "Sunny" & Temperature > 30, TRUE, FALSE))
+
+ER.data |> 
+  ggplot(aes(x = Sunny_and_Hot, y = ERVisits)) +
+  geom_boxplot() +
+  xlab("Sunny and Hot")
+
+# add polynomial expansion for time of the day
+ER.data <- ER.data %>%
+  mutate(across(TimeOfDay, 
+                .fns = list(p2 = ~.x^2,
+                            p3 = ~.x^3,
+                            p4 = ~.x^4,
+                            p5 = ~.x^5),
+                .names = "{.col}.{.fn}"))
+
+# Question 9
+# Use random forests to predict the number of daily visits to the ER.
+#
+# Split the sample in three subsamples: Training, Validation and Test. The Training sample should have approximately 40% of the observations, Validation 40% and Test 20%. (Note that the Test sample will not be used here but will be used in a question below.)
+#
+# Use the Training data to fit the random forest using a number of maximum features (mtry in R) ranging from 1 to maximum number of features in your dataset.
+#
+# Use the Validation data to choose by optimal number of maximum of features on the basis of prediction accuracy. (Use the MSE as a measure of accuracy).
+
+set.seed(123456)
+
+sample_indicator <- sample(
+  c(1, 2, 3) ,
+  size = nrow(ER.data) ,
+  replace = T ,
+  prob = c(0.4, 0.4, 0.2)
+)
+
+y <- ER.data$ERVisits
+X <- ER.data[, -1]
+
+y_train <- y[sample_indicator == 1]
+X_train <- X[sample_indicator == 1, ]
+y_val   <- y[sample_indicator == 2]
+X_val   <- X[sample_indicator == 2, ]
+y_test  <- y[sample_indicator == 3]
+X_test  <- X[sample_indicator == 3, ]
+
+mse_acc <- rep(0, ncol(X_train))
+
+for (max_features in 1:ncol(X_train)) {
+  rf  <- randomForest(x = X_train , y_train , mtry = max_features)
+  y_pred_val  <- predict(rf, X_val)
+  mse_acc[max_features]  <- mean((y_val - y_pred_val) ** 2)
+}
+
+mtry_star <- which.min(mse_acc)
+
+# Question 10
+# Make a plot of the MSE in the Validation sample as a function of the maximum number of features.
+#
+# Report the MSE relative to the ``Benchmark Model MSE'', which is the MSE of a linear regression of the ERVisits on Traffic.
+#
+# Estimate the Benchmark Model MSE by estimating the model on the training data and computing the MSE on the validation data.
+
+mdl.bench <- lm(ERVisits ~ Traffic , data = ER.data[sample_indicator == 1, ])
+y_val_pred <- predict(mdl.bench , newdata = ER.data[sample_indicator == 2, ])
+mse.bench <- mean((y_val - y_val_pred) ** 2)
+
+plot(1:ncol(X_train) , mse_acc / mse.bench , t = 'b')
+grid()
+points(which.min(mse_acc) ,
+       min(mse_acc) / mse.bench ,
+       col = 'red' ,
+       lwd = 10)
+
+# Question 11
+# Use the LASSO to predict the number of daily visits to the ER.
+#
+# Use the sample split obtained in question 5.
+#
+# Use the Training data to fit the lasso using a grid of values of the lasso tuning parameter λ ranging from 10−5 to 10−4.
+#
+# Use the Validation data to choose by optimal λ on the basis of prediction accuracy. (Use the MSE as a measure of accuracy).
+#
+# Note that you can use the LASSO regression using the entire set of predictors at your disposal or a subset if you wish.
+#
+# How sparse is the selected model? Can you interpret your result.
+
+nlambda <- 40
+mse_acc <- rep(0, nlambda)
+lambda.seq <- seq(10 ** (-4), 10 ** (-5), length.out = nlambda)
+
+# (slightly complicated way to) one-hot encoding
+X_train_mod <- cbind(as.matrix(X_train[, -c(4, 7)]) ,
+                     as.matrix(model.matrix(~ 0 + X_train[, 'Weather'])[, -1]) ,
+                     as.matrix(model.matrix(~ 0 + X_train[, 'TimeOfDay'])[, -1]))
+X_val_mod   <- cbind(as.matrix(X_val[, -c(4, 7)]) ,
+                     as.matrix(model.matrix(~ 0 + X_val[, 'Weather'])[, -1]) ,
+                     as.matrix(model.matrix(~ 0 + X_val[, 'TimeOfDay'])[, -1]))
+
+X_train_mod <- scale(X_train_mod)
+X_val_mod   <- scale(X_val_mod)
+
+for (i in 1:nlambda) {
+  mdl.lasso   <- glmnet(
+    x = X_train_mod ,
+    y = y_train ,
+    alpha = 1 ,
+    lambda = lambda.seq[i]
+  )
+  y_pred_val  <- predict(mdl.lasso, X_val_mod)
+  mse_acc[i]  <- mean((y_val - y_pred_val) ** 2)
+}
+
+lambda_star <- lambda.seq[which.min(mse_acc)]
+
+plot(lambda.seq , mse_acc)
+
+# Question 12
+# A colleague suggests to split the data for training and validation using the `year' variable. That is, use the 2023 data for training and the 2024 data for validation.
+#
+# Do you think that this strategy make sense? Explain your answer. You may want to motivate your answer using some descriptive statistics obtained from the data.
+
+# No, it is not a good idea because the dependence structure between ERVisits and the predictors does seem to be the same in the two years.
+boxplot( ER.data$ERVisits ~ ER.data$Year )
+
+# Question 13
+# Use the test data to compare the Random Forest and Lasso.
+#
+# In particula: 
+# 1. Train your models using the training data using the optimal number of max_features/shrinkage parameter obtained in the questions above, 
+# 2. Predict the test data using optimally trained models 
+# 3. Compute the MSE of the two models on the test data
+#
+# Which model performs best? Interpret your results.
+
+X_test_mod <- cbind(as.matrix(X_test[, -c(4, 7)]) ,
+                    as.matrix(model.matrix(~ 0 + X_test[, 'Weather'])[, -1]) ,
+                    as.matrix(model.matrix(~ 0 + X_test[, 'TimeOfDay'])[, -1]))
+X_test_mod <- scale(X_test_mod)
+
+# LASSO
+mdl.lasso.opt   <- glmnet(
+  x = X_train_mod ,
+  y = y_train ,
+  alpha = 1 ,
+  lambda = lambda_star
+)
+y_pred_test_lasso  <- predict(mdl.lasso.opt, X_test_mod)
+
+# RF
+rf.opt  <- randomForest(x = X_train , y_train , mtry = mtry_star)
+y_pred_test_rf  <- predict(rf, newdata = X_test)
+
+# results
+tab <- rbind(LASSO = mean((y_test - y_pred_test_lasso) ** 2),
+             RF = mean((y_test - y_pred_test_rf) ** 2))
+colnames(tab) <- "MSE"
+tab
+##            MSE
+## LASSO 86.06823
+## RF    56.63550
