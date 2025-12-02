@@ -1,0 +1,297 @@
+# Mock Datathon
+
+
+**Rules**
+
+*You have 1h15min to complete the datathon (those who are granted extra time should adjust their time according to their allowance)
+* Submit your jupyter notebook in google classroom in the assignment created under material.
+*The notebook needs to run and be reproducible.
+*R or Python allowed.
+*You are allowed to surf the web to search for functions or help you may need in the assignment. E.g., you may need a function that has not been discussed in class and you can search for it and go through the help file to understand how to use it
+**You are allowed to use only the techniques seen in class** You are free to use other implementation, but the algorithms, loss functions, and evaluation criteria should be the ones included in the notebook up to random forest included
+**Comment** on the steps/choices you make: justify the techniques/data science strategy used, why the were chosen and implemented in a certain way.
+**Comment** on the output of each procedure: do not just run the code. Explain the output and use it to answer the questions.
+**Make deliberate choices.** Do not simply include numerous plots or techniques. Present only the results that are meaningful and contribute to answering the question.
+
+# Baseball data
+
+*Finally a [Baseball dataset](https://raw.githubusercontent.com/barcelonagse-datascience/academic_files/master/data/Baseball.csv). You are in the data science team of a Baseball team. You have the following dataset that contain the following variables
+
+
+*`Hits` :Number of hits in 2023
+*`HmRun`: Number of home runs in 2023
+*`Runs`: Number of runs in 2023
+*`Years`: Number of years in the major leagues
+*`CHits`: Number of hits during his career
+*`CHmRun`: Number of home runs during his career
+*`CRuns`: Number of runs during his career
+*`League`: A factor with levels A and N indicating player's league at the end of 2023
+*`PutOuts`: Number of put outs in 2023
+*`Salary`: 2024 annual salary on opening day in thousands of dollars
+
+
+*Your task is to determine how much you want to pay someone. I.e., you are interested in predicting `salary`
+
+data <- read.csv('https://raw.githubusercontent.com/barcelonagse-datascience/academic_files/master/data/Baseball.csv')
+head(data)
+
+dim(data)
+n <- dim(data)[1]
+p <- dim(data)[2]
+
+* Before even starting, it is important to have an overall sense of the data set! So compute correlation, basic plots, etc.
+
+## Question 1
+
+*Develop a strategy to deal with missing data and outliers. This includes
+
+*(i) doing the exploratory steps that will help you with the analysis
+
+*(ii) commenting on what you done
+
+*(iii) commenting on the choices you have done.
+
+library(dplyr)
+#check missing data first
+colSums(is.na(data))
+
+#Salary has to be removed, it is the dependent variable, we cannot have missingness there. I will remove the rows
+data <- data[is.na(data$Salary)==FALSE,]
+
+#Now PutsOuts
+cor(data$PutOuts,data$Salary,use = "complete.obs")
+
+#at the end, correlation is just a measure of linear dependence though. Let's look at a 2d plot.
+plot(data$PutOuts,data$Salary)
+
+#It has no correlation with salary, which is my target variable, the assocition from the plot is not trivial to understand.
+# We decide to drop it.
+data <- data %>% select(-PutOuts)
+
+#Sanity check that everything has worked
+colSums(is.na(data))
+
+#Plot and summary to have a sense of potential outlier
+boxplot(data[, sapply(data, is.numeric)])
+
+summary(data)
+
+#it makes no sense that Years has a maximum at 5000. It must be some mistake.
+#My strategy is to remove those observations since they contain suspicious entries
+data <- data[data$Years <1000,]
+
+#I look at a few extreme points
+data[which.max(data$Salary),]
+
+* Eddie Murray has the highest salary. But it looks to me that it has a performance on many metrics that is way above average.
+
+* For the  remaining variables, I also looked at individual plot (I did not added them for parsimony). There are indeed some 
+* extreme observations. However, it is part of competitive sports of having some extreme performance. We decide not to do anything further.
+* Although, a further look at the data is required.
+
+dim(data)
+data <- data[,-1]
+
+## Question 2
+
+* The head of your team points our that there are several features that are somewhat repeated (they measure a similar concept in different ways)
+* and ask you to find a way to reduce the number of features
+
+* You see that there are several variables that are connected, since they measure the same things at different "scale", for example referring 
+* the performance of last year and the career. An idea is to combine them into one.
+* In addition, your boss think that `Years` and `League` are not valuable variables. He asks you to create a new variable that interacts the 
+* levels of seniority with league. You can decide what `level of seniority` means but definitely it must have a small number of categories 
+* (like 2 or 3)
+
+* Create a new dataset including the new features and get rid of the ones that you have used to create the new features.
+
+#First part, I see that Hits-CHits, HmRun-CmRun, and Runs-CRuns are paired.
+# I can create new variable that tells me ratio of last year wrt to the career performance
+Runs_ratio = data$Runs/data$CRuns
+HmRun_ratio = data$HmRun/data$CHmRun
+Hits_ratio = data$Hits/data$CHits
+
+#Now, I am gonna create a new variable seniority_league
+#I create two levels of seniority: Junior, and Senior
+median(data$Years)
+unique(data$League)
+
+n <- dim(data)[1]
+seniority_league <- rep(0,n)
+for (i in 1:dim(data)[1]){
+  if (data$Years[i]<= 6){
+    if (data$League[i]=="A"){
+    seniority_league[i] <- "Junior-A"
+  } else {
+    seniority_league[i] <- "Junior-N"
+  }
+  } else {
+  if (data$League[i]=="A"){
+    seniority_league[i] <- "Senior-A"
+  } else {
+    seniority_league[i] <- "Senior-N"
+  }
+}
+}
+
+table(seniority_league)
+
+* This variable is fairly well balanced.
+
+new_data <- cbind(data %>% select(Salary),seniority_league,Runs_ratio,HmRun_ratio,Hits_ratio)
+head(new_data)
+
+* We modified the data. Again, I want to have a basic look at my dataset, so I am better prepared for further steps in the analysis.
+
+summary(new_data)
+which(new_data$HmRun_ratio==Inf)
+
+new_data %>% select(-seniority_league) %>% cor(use = "complete.obs")
+
+## Question 3
+**Note**: here and in Q4 you will run a few algorithms and  you are asked to compare them (check also question below). So make sure you get 
+* the data ready to have a "fair comparison".
+
+* In this Question, use the new dataset you just created in Q2.
+
+* - Use a linear regression model to predict `salary`. Choose a way of doing it that includes all the covariates and such that the coefficients are unbiased.
+
+* - Evaluate its performance as a predictor using an appropriate strategy and evaluation criteria (you can use more than one).
+
+* - Compare the predictive performance of the linear regression with a nonlinear method of your choice (don't worry about optimizing it!)
+
+#the sample size is not too large to do a three way split. I will do a two-way one.
+#Possibly using cv if I need to choose parameters
+#I will not have time and space to reproduce the analysis for multiple splits. However, all my outcomes depends on this given split
+#For a serious analysis, it will be essentially to check the robustness (especially in light of the sample size, which is fairly small!)
+id_train <- sample(n,floor(0.7*n) ,replace=FALSE)
+id_test <- setdiff(seq(1,n),id_train)
+data_train <- new_data[id_train,]
+data_test <- new_data[id_test,]
+
+#I need to run a linear model
+linear <- lm(Salary ~ ., data=data_train)
+summary(linear)
+#compute MSE
+y_pred <- predict(linear, data=data_test)
+MSE <- mean((y_pred-data_test$Salary)^2)
+ MSE
+#clearly horrible performance!
+
+colnames(data_train)
+
+head(data_train)
+
+#I choose KNN. I may want to do something about the categorical predictor (recall that I need to compute the distance between obs)
+#However, here, I simply decide to drop it.
+
+if (!require(FNN)){ install.packages('FNN') }
+library(FNN)
+knn <- knn.reg(data_train[,-c(1,2)],  y=data_train[,1],test=data_test[,-c(1,2)], k = 4)
+MSE_knn <- mean((data_test[,1]-knn$pred)^2)
+MSE_knn
+
+* (In my runs, I tried a few times) Performance of KNN is better without optimizing k and dropping one predictor. Possible explanations:
+* - evidence of nonlinearity
+* - luck (it is just based on this split)
+
+## Question 4
+
+*- Fit a regression tree to the training data, again to predict `salary`, using the dataset you obtained at Q2. You want to determine what's the optimal tree size.
+
+*- Do a plot including on the y-axis the metric you are using to evaluate the optimal parameter, on the x-axis, the parameter you are optimizing
+
+*- Have a look at the regression function. Try to interpret and do a comparison with the one obtained in the previous step.
+
+if( !require(rpart)) {install.packages('rpart')}
+if( !require(rpart.plot)) {install.packages('rpart.plot')}
+library(rpart)
+library(rpart.plot)
+
+#Ideally I should  do it with CV. I use my test data set instead
+#(I know that this will be a limitation if we have to do a comparison)
+depth = seq(1,20)
+MSE_d <- rep(0,20)
+for (m in depth){
+dTree  <- rpart(Salary~.,data_train,maxdepth=m)
+y_pred <- predict(dTree,newdata = data_test)
+MSE_d[m-1] <- mean((y_pred-data_test$Salary)^2)
+}
+plot(depth,MSE_d)
+which.min(MSE_d)
+
+* I can obtain an optimal parameter (min Test MSE). However, I should in theory further to test it on different test data.
+
+dTree  <- rpart(Salary~.,data_train,maxdepth=which.min(MSE_d))
+plot(dTree)
+text(dTree, use.n = TRUE, all = TRUE, cex = 0.8)
+dev.off()
+
+#Again, it seems that the variable that we have created is not very good! overall, it does not get picked much.
+
+## Question 5
+
+* You are not convinced that the feature engineering that your boss asked you to do was a good idea.
+
+* Try to find evidence that the feature engineering was unnecessary or possibly even detrimental.
+
+**Note**: the answer can be very short! And you can use any data that you have at your disposal (the dataset generated in Q2 and the original 
+* one)
+
+#there are two strategies. Both answers could be good.
+#First, run a method that select the variable using the joint dataset with all the variables generated (data + new_data) and show that the "old variables" get selected
+
+dTree2  <- rpart(Salary~.,cbind(data,new_data[,-c(1,2)]),maxdepth=15)
+var_imp  <- sort( dTree2$variable.importance/max(dTree2$variable.importance),decreasing=TRUE)
+var_imp
+#Note! the two most important variables have been removed!
+
+#second strategy: I rerun any of the prediction method used so far and I see I can get a better MSE uusing only the old variables!
+data_train2 <- data[id_train,]
+data_test2 <- data[id_test,]
+
+linear <- lm(Salary ~ ., data=data_train2)
+summary(linear)
+#compute MSE
+y_pred <- predict(linear, data=data_test2)
+MSE <- mean((y_pred-data_test2$Salary)^2)
+MSE
+
+#We get a worst MSE but at least som of the variables are significant!
+
+## Question 6
+
+*Extract from one of the methods previously used what are the two most important variable to predict the salary. Ideally, don't pick them 
+* at random but choose the two most important ones. Explain how you did it.
+
+* (For the purpose of writing the question I call the two variables, `var1` and `var2`)
+
+* - Now, your boss asks you: *What's the combination of `var1` and `var2` that gives the maximum probability of having a salary larger than 
+* $1000?.* I.e. compute
+
+* $$\arg \max_{var1,var2} P (\text{salary}>1000| var1,var2)$$
+
+* Note: feel free to choose a range and a grid of values for `var1` and `var2`
+
+#I choose two variables for example the top two in
+dTree2  <- rpart(Salary~.,cbind(data,new_data[,-1]),maxdepth=15)
+var_imp  <- sort( dTree2$variable.importance/max(dTree2$variable.importance),decreasing=TRUE)
+var_imp
+
+# I need to run a logit and obtain a prediction of P(salary|Chits, CRuns)
+#Create a binary variable
+y <- (data$Salary>1000)*1
+dataQ6 <- cbind(y,data %>% select(CHits,CRuns))
+
+#Run logit
+logit  <- glm(y ~ . , data = dataQ6 , family = binomial(logit))
+summary(logit)
+
+CHits_grid <- seq(min(dataQ6$CHits),max(dataQ6$CHits),length.out=10)
+CRuns_grid <- seq(min(dataQ6$CRuns),max(dataQ6$CRuns),length.out=10)
+X <- expand.grid(CHits_grid,CRuns_grid)
+colnames(X)<-c("CHits","CRuns")
+
+#Now I evaluate max predicted probability
+prob<- predict(logit, newdata = X, type = "response")
+X[which.max(prob),]
