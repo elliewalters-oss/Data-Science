@@ -1,0 +1,353 @@
+# Exercise 1
+# Lorenzo Cappello, Alessandro Ciancetta, Alberto Santini
+# 2025-11-14
+
+# Question 1
+# Load the commute time dataset and inspect for outliers. Devise a strategy to handle them.
+
+# Load dataset, parse start, finish, and weekday as factors
+raw_data <- read_csv(
+  'https://github.com/barcelonagse-datascience/academic_files/raw/master/data/commute_time.csv',
+  col_types = cols(start = "f", finish = "f", weekday = "f")
+)
+
+# Inspect initial rows and summary statistics
+raw_data |> head()
+## # A tibble: 6 x 10
+##    year start          s_lat s_long finish    f_lat f_long commu~1 avail weekday
+##   <dbl> <fct>          <dbl>  <dbl> <fct>     <dbl>  <dbl>   <dbl> <dbl> <fct>  
+## 1  2023 Gothic Quarter 4138.   218. Poble Sec 4137.   216.    6.69     3 Thurs  
+## 2  2023 Sarria         4140.   213. Gothic Q~ 4138.   218.   23.5      8 Tue    
+## 3  2024 Gracia         4141.   216. Eixample  4139.   216.    2.56     0 Thurs  
+## 4  2024 Sants          4138.   214. Sarria    4140.   213.   11.1      0 Tue    
+## 5  2024 El Born        4139.   218. Eixample  4139.   216.   10.8      0 Fri    
+## 6  2023 Sants          4138.   214. El Raval  4138.   217.   14.5      0 Tue    
+## # ... with abbreviated variable name 1: commute_time
+
+summary(raw_data)
+##       year              start         s_lat          s_long     
+##  Min.   :2023   El Born    :259   Min.   :4137   Min.   :212.8  
+##  1st Qu.:2023   Sants      :232   1st Qu.:4138   1st Qu.:215.7  
+##  Median :2024   Eixample   :228   Median :4138   Median :216.4  
+##  Mean   :2024   Sarria     :217   Mean   :4139   Mean   :216.3  
+##  3rd Qu.:2024   El Raval   :212   3rd Qu.:4139   3rd Qu.:217.7  
+##  Max.   :2024   Sant Antoni:211   Max.   :4141   Max.   :218.9  
+##                 (Other)    :822                                 
+##             finish        f_lat          f_long       commute_time    
+##  Eixample      :243   Min.   :4137   Min.   :212.8   Min.   :  0.000  
+##  El Raval      :230   1st Qu.:4138   1st Qu.:215.7   1st Qu.:  6.836  
+##  Sarria        :225   Median :4138   Median :216.2   Median : 16.016  
+##  Gothic Quarter:220   Mean   :4139   Mean   :216.3   Mean   : 22.467  
+##  Sants         :214   3rd Qu.:4139   3rd Qu.:217.7   3rd Qu.: 28.247  
+##  Poble Sec     :212   Max.   :4141   Max.   :218.9   Max.   :504.380  
+##  (Other)       :837                                                   
+##      avail        weekday   
+##  Min.   :0.000   Thurs:640  
+##  1st Qu.:0.000   Tue  :535  
+##  Median :1.000   Fri  :386  
+##  Mean   :1.077   Mon  :186  
+##  3rd Qu.:2.000   Wed  :417  
+##  Max.   :8.000   NA   : 17  
+##  NA's   :21
+
+# Check scatter plots for start and finish coordinates
+ggplot(raw_data, aes(x = s_lat, y = s_long)) + geom_point()
+
+ggplot(raw_data, aes(x = f_lat, y = f_long)) + geom_point()
+
+# Check availability distribution
+max_avail <- max(raw_data$avail, na.rm = TRUE)
+ggplot(raw_data %>% drop_na(avail), aes(x = avail)) +
+    geom_histogram(breaks = seq(max_avail)) +
+    scale_x_continuous(breaks = seq(max_avail))
+
+# Check commute_time distribution
+ggplot(raw_data, aes(x = commute_time)) + geom_histogram(bins = 50)
+
+# Remove unrealistic commute times (>200 min) and rows with missing commute_time
+raw_data <- raw_data %>% filter(!is.na(commute_time) & commute_time < 200)
+ggplot(raw_data, aes(x = commute_time)) + geom_histogram(bins = 50)
+
+# Question 2
+# Create new features route and distance.
+
+raw_data <- raw_data %>%
+    mutate(
+        route = paste(start, "to", finish),
+        distance = sqrt((s_lat - f_lat)^2 + (s_long - f_long)^2)
+    )
+raw_data |> head()
+## # A tibble: 6 x 12
+##    year start       s_lat s_long finish f_lat f_long commu~1 avail weekday route
+##   <dbl> <fct>       <dbl>  <dbl> <fct>  <dbl>  <dbl>   <dbl> <dbl> <fct>   <chr>
+## 1  2023 Gothic Qua~ 4138.   218. Poble~ 4137.   216.    6.69     3 Thurs   Goth~
+## 2  2023 Sarria      4140.   213. Gothi~ 4138.   218.   23.5      8 Tue     Sarr~
+## 3  2024 Gracia      4141.   216. Eixam~ 4139.   216.    2.56     0 Thurs   Grac~
+## 4  2024 Sants       4138.   214. Sarria 4140.   213.   11.1      0 Tue     Sant~
+## 5  2024 El Born     4139.   218. Eixam~ 4139.   216.   10.8      0 Fri     El B~
+## 6  2023 Sants       4138.   214. El Ra~ 4138.   217.   14.5      0 Tue     Sant~
+## # ... with 1 more variable: distance <dbl>, and abbreviated variable name
+## #   1: commute_time
+
+# Question 3
+# Aggregate data by year and route. Choose appropriate summaries for each column.
+
+# Function to compute mode
+my_mode <- function(x) {
+    names(sort(table(x), decreasing = TRUE))[1]
+}
+
+data <- raw_data %>%
+    group_by(year, route) %>%
+    summarise(
+        commute_time = mean(commute_time),
+        distance = first(distance),
+        avail = mean(avail, na.rm = TRUE),
+        weekday = my_mode(weekday),
+        start = first(start),
+        finish = first(finish),
+        .groups = "drop"
+    ) %>%
+    arrange(year, as.character(route))
+data |> head()
+## # A tibble: 6 x 8
+##    year route                         commu~1 dista~2 avail weekday start finish
+##   <dbl> <chr>                           <dbl>   <dbl> <dbl> <chr>   <fct> <fct> 
+## 1  2023 Barceloneta to Barceloneta       6.62   0     0.667 Fri     Barc~ Barce~
+## 2  2023 Barceloneta to Eixample          8.69   2.88  1     Tue     Barc~ Eixam~
+## 3  2023 Barceloneta to El Born          17.2    0.861 0     Tue     Barc~ El Bo~
+## 4  2023 Barceloneta to El Raval          5.84   2.17  0.933 Thurs   Barc~ El Ra~
+## 5  2023 Barceloneta to Gothic Quarter    1.88   1.25  0.778 Wed     Barc~ Gothi~
+## 6  2023 Barceloneta to Gracia           17.3    4.34  1     Tue     Barc~ Gracia
+## # ... with abbreviated variable names 1: commute_time, 2: distance
+
+# Question 4
+# Feature engineering to improve prediction. Explore relationships.
+
+# Possibly quadratic relationship
+ggplot(data, aes(x = distance, y = commute_time)) + geom_point() +
+  geom_smooth(method = "lm") +
+  stat_smooth(method = "lm", formula = y ~ x + I(x^2), size = 1, color = "red")
+## Warning: Using `size` aesthetic for lines was deprecated in ggplot2 3.4.0.
+## i Please use `linewidth` instead.
+## This warning is displayed once every 8 hours.
+## Call `lifecycle::last_lifecycle_warnings()` to see where this warning was
+## generated.
+## `geom_smooth()` using formula = 'y ~ x'
+
+# Commute time higher if no available slots
+avdata <- data %>%
+    mutate(avail_cond = if_else(avail == 0, "avail = 0", "avail > 0"))
+ggplot(avdata, aes(x = avail_cond, y = commute_time)) + geom_boxplot()
+
+# Trips longer if start is "El Raval"
+ggplot(data, aes(x = start, y = commute_time)) + geom_boxplot()
+
+ggplot(data, aes(x = finish, y = commute_time)) + geom_boxplot()
+
+# Feature engineering
+data <- data %>%
+    mutate(
+        distance_sq = distance^2,
+        saturated = (avail == 0),
+        start_raval = (start == "El Raval")
+    )
+
+# Question 5
+# Train/test split, regression models, and compute RMSE.
+
+data <- data |> select(commute_time, distance, distance_sq, saturated, start_raval, year)
+data_2023 <- data |> filter(year == 2023) |> select(-year)
+data_2024 <- data |> filter(year == 2024) |> select(-year)
+y_test <- data_2024$commute_time
+
+# OLS regression
+ols_model <- lm(commute_time ~ ., data = data_2023)
+ols_pred <- predict(ols_model, newdata = data_2024)
+ols_mse <- mean((y_test - ols_pred)^2)
+ols_rmse <- sqrt(ols_mse)
+
+# Elastic net regression
+x_train <- data_2023 |> select(-commute_time) |> as.matrix()
+y_train <- data_2023 |> pull(commute_time)
+x_test  <- data_2024 |> select(-commute_time) |> as.matrix()
+elasticnet_cv <- cv.glmnet(x = x_train, y = y_train, alpha = 0.5, nfolds = 10)
+coef(elasticnet_cv, s = 'lambda.min')
+## 5 x 1 sparse Matrix of class "dgCMatrix"
+##                    s1
+## (Intercept)  4.132932
+## distance     .       
+## distance_sq  1.079772
+## saturated    9.278576
+## start_raval 39.737835
+
+y_hat <- cbind(1,x_test) %*% coef(elasticnet_cv, s = 'lambda.min')
+mse <- mean((y_test - y_hat)^2)
+elasticnet_rmse <- sqrt(mse)
+
+# Baseline prediction: mean of y on the training set
+mse <- mean((y_test - mean(y_train))^2)
+mean_rmse <- sqrt(mse)
+
+# summarize in table
+tab <- rbind(ols = ols_rmse, enet = elasticnet_rmse, mean = mean_rmse)
+colnames(tab) <- "RMSE"
+round(tab, 3)
+##        RMSE
+## ols   4.938
+## enet  4.898
+## mean 14.456
+
+# ... or relative to the RMSE of the benchmark model
+tab <- rbind(ols = ols_rmse/mean_rmse, enet = elasticnet_rmse/mean_rmse)
+colnames(tab) <- "Relative RMSE"
+round(tab, 3)
+##      Relative RMSE
+## ols          0.342
+## enet         0.339
+
+# Dataset 2: Income
+# You have a dataset where each row represents a different country, capturing various 
+# indicators related to income, education, labor, and other factors:
+#
+# income: an index reflecting the average income level (not the income itself).
+# family_support: an index showing the extent of family investment in education.
+# education_spending: an index reflecting government spending on education.
+# labour_productivity: an index measuring workforce productivity.
+# unemployment_rate: the unemployment rate.
+# public_system: a binary indicator, where 0 denotes a weak public school system and 1 indicates a stronger system.
+# mountain: the height of the tallest mountain in the country.
+# Your objective is to predict the income index using the other variables in the dataset.
+#
+# Note: Focus solely on what the data suggests rather than building an economically interpretable model.
+
+# Question 6
+# Handle missing data in income dataset.
+
+data <- read_csv('https://raw.githubusercontent.com/barcelonagse-datascience/academic_files/refs/heads/master/data/income_new.csv',
+                 col_select = c(-1)) # drop X column
+## New names:
+## Rows: 97 Columns: 7
+## -- Column specification
+## -------------------------------------------------------- Delimiter: "," dbl
+## (7): income, family_support, education_spending, labour_productivity, un...
+## i Use `spec()` to retrieve the full column specification for this data. i
+## Specify the column types or set `show_col_types = FALSE` to quiet this message.
+## * `` -> `...1`
+
+data |> head()
+## # A tibble: 6 x 7
+##   income family_support education_spending labour_prod~1 unemp~2 publi~3 mount~4
+##    <dbl>          <dbl>              <dbl>         <dbl>   <dbl>   <dbl>   <dbl>
+## 1 10.6              NA               104.          10.5    0.391       1   1022.
+## 2  5.67            180.               99.5         11.6    5.05        0    946.
+## 3  0.298           170.               97.5          8.14   5.78        1   1089.
+## 4  1.94            170.              100.          11.8    6.54        1     NA 
+## 5 -5.30            171.               99.5         10.1    9.45        1   1164.
+## 6  5.51            181.               99.2         11.4    5.12        0   1069.
+## # ... with abbreviated variable names 1: labour_productivity,
+## #   2: unemployment_rate, 3: public_system, 4: mountain
+
+# Check missing values
+colMeans(is.na(data)) * 100
+##              income      family_support  education_spending labour_productivity 
+##            0.000000           21.649485            0.000000            0.000000 
+##   unemployment_rate       public_system            mountain 
+##            0.000000            3.092784           20.618557
+
+colSums(is.na(data))
+##              income      family_support  education_spending labour_productivity 
+##                   0                  21                   0                   0 
+##   unemployment_rate       public_system            mountain 
+##                   0                   3                  20
+
+# We have missing data in columns family_support, public_system, and mountain.
+# Mountains seem to have a low correlation with the income.
+# The other columns all have stronger correlations with the income.
+cor(data, use = "complete.obs") |> corrplot::corrplot()
+
+# The distribution of family_support seems bimodal. We impute by the mean of the 
+# two distinct groups (public education / private education)
+data |> 
+  filter(!is.na(public_system)) |> 
+  ggplot(aes(x = as_factor(public_system), y = family_support)) +
+  geom_boxplot()
+## Warning: Removed 20 rows containing non-finite outside the scale range
+## (`stat_boxplot()`).
+
+# Depending on the variable, we can adopt different strategies for dealing with the missing values: 
+# - remove the rows with missing values, if they are a few (e.g. public_system, which only has 3 missing values) 
+# - imputing them, using a technique of your choice that preserves/mimics the variability of the predictor. 
+# - with many caveats, removing the entire column (in this example, the mountain variable)
+
+# Remove / impute missing values
+data <- data |> filter(!is.na(public_system)) |> select(-mountain)
+data <- data %>%
+    group_by(public_system) %>%
+    mutate(family_support = replace_na(family_support, mean(family_support, na.rm = TRUE))) %>%
+    ungroup()
+colSums(is.na(data))
+##              income      family_support  education_spending labour_productivity 
+##                   0                   0                   0                   0 
+##   unemployment_rate       public_system 
+##                   0                   0
+
+# Question 7
+# Compare prediction errors: full vs restricted model.
+
+# Train-test split
+train_data <- data |> slice_sample(prop = 0.7)
+test_data  <- anti_join(data, train_data, by = colnames(data))
+
+# OLS with all the predictors VS. OLS with subset of predictors
+reg_model_all <- lm(income ~ -1 + ., data = train_data)
+reg_model_sub <- lm(income ~ -1 + unemployment_rate + labour_productivity, data = train_data)
+
+# get the out-sample MSEs
+y_hat_all <- predict(reg_model_all, newdata = test_data)
+y_hat_sub <- predict(reg_model_sub, newdata = test_data)
+mse_all <- mean((y_hat_all - test_data$income)^2)
+mse_sub <- mean((y_hat_sub - test_data$income)^2)
+
+# the sample mean actually performs better... It's important to have a benchmark!
+mse_mean <- mean((mean(test_data$income) - test_data$income)^2)
+
+# output results
+tab <- rbind(full = mse_all, restricted = mse_sub, sample_mean = mse_mean)
+colnames(tab) <- "MSE"
+tab
+##                  MSE
+## full        25.85466
+## restricted  40.30794
+## sample_mean 44.61399
+
+# Question 8
+# Feature expansion and penalized regression: LASSO, Ridge, Elastic Net.
+
+# use the mutate(across()) functions to include squared and cubic terms of the predictors,
+# in order to catch potential non-linearities
+dataxl <- data %>%
+    mutate(across(-public_system, list(sq = ~ .^2, cube = ~ .^3), .names = "{.col}_{.fn}"))
+
+dataxl <- data.frame(scale(dataxl))
+y <- dataxl$income
+X <- subset(dataxl, select = -income)
+cv1  <- cv.glmnet(as.matrix(X), y, nfold = 10, alpha = 1)
+cv.5 <- cv.glmnet(as.matrix(X), y, nfold = 10, alpha = 0.5)
+cv0  <- cv.glmnet(as.matrix(X), y, nfold = 10, alpha = 0)
+
+cv_rmse <- data.frame(
+  Model = c("Lasso (alpha=1)", "Elastic Net (alpha=0.5)", "Ridge (alpha=0)"),
+  Lambda_min = c(cv1$lambda.min, cv.5$lambda.min, cv0$lambda.min),
+  RMSE_min = c(min(cv1$cvm), min(cv.5$cvm), min(cv0$cvm))
+)
+cv_rmse
+##                     Model   Lambda_min   RMSE_min
+## 1         Lasso (alpha=1) 0.0009325403 0.06715962
+## 2 Elastic Net (alpha=0.5) 0.0016993920 0.07323226
+## 3         Ridge (alpha=0) 0.9325403218 0.20783376
+
+# For next time
+# Can you guess what's imprecise here about how we standardize the data? Think about 
+# the reported results and about potential information leakages from the test set to 
+# the training set…
