@@ -1,0 +1,509 @@
+# Exercise 0
+# Lorenzo Cappello, Alessandro Ciancetta, Alberto Santini
+
+# Question 1
+# Read the Titanic dataset and print its first rows and summary statistics.
+
+# Load the dataset using base R. read.csv() often imports text columns as character.
+data <- read.csv(file = "data/titanic3.csv")
+
+# Inspect the initial rows to understand the data structure.
+head(data, n = 10)
+##    pclass survived                                            name    sex   age
+## 1       1        1                   Allen, Miss. Elisabeth Walton female 29.00
+## 2       1        1                  Allison, Master. Hudson Trevor   male  0.92
+## 3       1        0                    Allison, Miss. Helen Loraine female  2.00
+## 4       1        0            Allison, Mr. Hudson Joshua Creighton   male 30.00
+## 5       1        0 Allison, Mrs. Hudson J C (Bessie Waldo Daniels) female 25.00
+## 6       1        1                             Anderson, Mr. Harry   male 48.00
+## 7       1        1               Andrews, Miss. Kornelia Theodosia female 63.00
+## 8       1        0                          Andrews, Mr. Thomas Jr   male 39.00
+## 9       1        1   Appleton, Mrs. Edward Dale (Charlotte Lamson) female 53.00
+## 10      1        0                         Artagaveytia, Mr. Ramon   male 71.00
+##    sibsp parch   ticket     fare   cabin embarked boat body
+## 1      0     0    24160 211.3375      B5        S    2   NA
+## 2      1     2   113781 151.5500 C22 C26        S   11   NA
+## 3      1     2   113781 151.5500 C22 C26        S        NA
+## 4      1     2   113781 151.5500 C22 C26        S       135
+## 5      1     2   113781 151.5500 C22 C26        S        NA
+## 6      0     0    19952  26.5500     E12        S    3   NA
+## 7      1     0    13502  77.9583      D7        S   10   NA
+## 8      0     0   112050   0.0000     A36        S        NA
+## 9      2     0    11769  51.4792    C101        S    D   NA
+## 10     0     0 PC 17609  49.5042                C        22
+##                          home.dest
+## 1                     St Louis, MO
+## 2  Montreal, PQ / Chesterville, ON
+## 3  Montreal, PQ / Chesterville, ON
+## 4  Montreal, PQ / Chesterville, ON
+## 5  Montreal, PQ / Chesterville, ON
+## 6                     New York, NY
+## 7                       Hudson, NY
+## 8                      Belfast, NI
+## 9              Bayside, Queens, NY
+## 10             Montevideo, Uruguay
+
+# Summary statistics help check variable types and missingness.
+summary(data)
+##      pclass         survived         name               sex           
+##  Min.   :1.000   Min.   :0.000   Length:1309        Length:1309       
+##  1st Qu.:2.000   1st Qu.:0.000   Class :character   Class :character  
+##  Median :3.000   Median :0.000   Mode  :character   Mode  :character  
+##  Mean   :2.295   Mean   :0.382                                        
+##  3rd Qu.:3.000   3rd Qu.:1.000                                        
+##  Max.   :3.000   Max.   :1.000                                        
+##                                                                       
+##       age            sibsp            parch          ticket         
+##  Min.   : 0.17   Min.   :0.0000   Min.   :0.000   Length:1309       
+##  1st Qu.:21.00   1st Qu.:0.0000   1st Qu.:0.000   Class :character  
+##  Median :28.00   Median :0.0000   Median :0.000   Mode  :character  
+##  Mean   :29.88   Mean   :0.4989   Mean   :0.385                     
+##  3rd Qu.:39.00   3rd Qu.:1.0000   3rd Qu.:0.000                     
+##  Max.   :80.00   Max.   :8.0000   Max.   :9.000                     
+##  NA's   :263                                                        
+##       fare            cabin             embarked             boat          
+##  Min.   :  0.000   Length:1309        Length:1309        Length:1309       
+##  1st Qu.:  7.896   Class :character   Class :character   Class :character  
+##  Median : 14.454   Mode  :character   Mode  :character   Mode  :character  
+##  Mean   : 33.295                                                           
+##  3rd Qu.: 31.275                                                           
+##  Max.   :512.329                                                           
+##  NA's   :1                                                                 
+##       body        home.dest        
+##  Min.   :  1.0   Length:1309       
+##  1st Qu.: 72.0   Class :character  
+##  Median :155.0   Mode  :character  
+##  Mean   :160.8                     
+##  3rd Qu.:256.0                     
+##  Max.   :328.0                     
+##  NA's   :1188
+
+# Question 2
+# Compute the number of missing observations manually. Compare loading with read.csv() and read_csv().
+
+# Missing values included as NA.
+colMeans(is.na(data))
+##       pclass     survived         name          sex          age        sibsp 
+## 0.0000000000 0.0000000000 0.0000000000 0.0000000000 0.2009167303 0.0000000000 
+##        parch       ticket         fare        cabin     embarked         boat 
+## 0.0000000000 0.0000000000 0.0007639419 0.0000000000 0.0000000000 0.0000000000 
+##         body    home.dest 
+## 0.9075630252 0.0000000000
+
+# Missing values encoded as empty strings (""). Warning: unsafe for numeric columns.
+colMeans(data == "")
+##      pclass    survived        name         sex         age       sibsp 
+## 0.000000000 0.000000000 0.000000000 0.000000000          NA 0.000000000 
+##       parch      ticket        fare       cabin    embarked        boat 
+## 0.000000000 0.000000000          NA 0.774637128 0.001527884 0.628724217 
+##        body   home.dest 
+##          NA 0.430863254
+
+# Solution:
+# option 1) manually convert empty strings to missing values
+check_missing <- function(column) is.na(column) | (column == "")
+colMeans(sapply(data, check_missing))
+##       pclass     survived         name          sex          age        sibsp 
+## 0.0000000000 0.0000000000 0.0000000000 0.0000000000 0.2009167303 0.0000000000 
+##        parch       ticket         fare        cabin     embarked         boat 
+## 0.0000000000 0.0000000000 0.0007639419 0.7746371276 0.0015278839 0.6287242170 
+##         body    home.dest 
+## 0.9075630252 0.4308632544
+
+# option 2) Reload using read_csv(), which automatically parses types and treats "" as NA
+# due to an optimized column-type detection while loading the data
+data <- read_csv(file = "data/titanic3.csv")
+## Rows: 1309 Columns: 14
+## -- Column specification --------------------------------------------------------
+## Delimiter: ","
+## chr (7): name, sex, ticket, cabin, embarked, boat, home.dest
+## dbl (7): pclass, survived, age, sibsp, parch, fare, body
+## 
+## i Use `spec()` to retrieve the full column specification for this data.
+## i Specify the column types or set `show_col_types = FALSE` to quiet this message.
+
+# Now missing values are more consistently handled.
+colMeans(is.na(data))
+##       pclass     survived         name          sex          age        sibsp 
+## 0.0000000000 0.0000000000 0.0000000000 0.0000000000 0.2009167303 0.0000000000 
+##        parch       ticket         fare        cabin     embarked         boat 
+## 0.0000000000 0.0000000000 0.0007639419 0.7746371276 0.0015278839 0.6287242170 
+##         body    home.dest 
+## 0.9075630252 0.4308632544
+
+# Question 3
+# Did Major Archibald Willingham Butt survive the shipwreck?
+
+# Detect rows whose name contains "Butt". Extract the survival indicator as Boolean.
+data |>
+  filter(str_detect(name, "Butt")) |>
+  pull(survived) |>
+  as.logical()
+## [1] FALSE
+
+# Question 4
+# For each lifeboat, compute the total number of passengers who took it and their fraction relative to all passengers with a unique lifeboat.
+
+# Exclude passengers with multiple boats (spaces in boat field).
+# Count passengers per boat and compute relative proportions.
+data |>
+  filter(!str_detect(boat, " ")) |>
+  group_by(boat) |>
+  summarise(n_passengers = n(), .groups = "drop") |>
+  mutate(perc = n_passengers / sum(n_passengers))
+## # A tibble: 20 x 3
+##    boat  n_passengers   perc
+##    <chr>        <int>  <dbl>
+##  1 1                5 0.0105
+##  2 10              29 0.0609
+##  3 11              25 0.0525
+##  4 12              19 0.0399
+##  5 13              39 0.0819
+##  6 14              33 0.0693
+##  7 15              37 0.0777
+##  8 16              23 0.0483
+##  9 2               13 0.0273
+## 10 3               26 0.0546
+## 11 4               31 0.0651
+## 12 5               27 0.0567
+## 13 6               20 0.0420
+## 14 7               23 0.0483
+## 15 8               23 0.0483
+## 16 9               25 0.0525
+## 17 A               11 0.0231
+## 18 B                9 0.0189
+## 19 C               38 0.0798
+## 20 D               20 0.0420
+
+# Question 5
+# Compute the fraction of first-class passengers and the average fare for those who took a lifeboat vs those who did not.
+
+# Base R table: total passengers per class and proportions.
+cbind(
+  total = table(data$pclass),
+  perc  = round(prop.table(table(data$pclass)), 2)
+)
+##   total perc
+## 1   323 0.25
+## 2   277 0.21
+## 3   709 0.54
+
+# Create on_boat indicator and summarise distribution and fares.
+data |>
+  mutate(on_boat = !is.na(boat)) |>
+  group_by(on_boat, pclass) |>
+  summarise(
+    perc_first_class = mean(pclass == 1),
+    number = n(),
+    avg_fare = mean(fare, na.rm = TRUE),
+    .groups = "drop"
+  )
+## # A tibble: 6 x 5
+##   on_boat pclass perc_first_class number avg_fare
+##   <lgl>    <dbl>            <dbl>  <int>    <dbl>
+## 1 FALSE        1                1    122     71.3
+## 2 FALSE        2                0    165     19.8
+## 3 FALSE        3                0    536     13.3
+## 4 TRUE         1                1    201     97.3
+## 5 TRUE         2                0    112     23.2
+## 6 TRUE         3                0    173     13.2
+
+# Question 6
+# How many passengers were doctors?
+
+# Count names containing "Dr." (escaped dot).
+data |>
+  filter(str_detect(name, "Dr\\.")) |>
+  summarise(number_doctors = n())
+## # A tibble: 1 x 1
+##   number_doctors
+##            <int>
+## 1              8
+
+# Question 7
+# Make a boxplot of age by passenger class and sex.
+
+# Remove missing ages and convert grouping variables to factors for plotting.
+data |>
+  filter(!is.na(age)) |>
+  mutate(across(c(pclass, sex), as.factor)) |>
+  ggplot(aes(x = pclass, y = age, fill = sex)) +
+  geom_boxplot() +
+  theme_minimal()
+
+# Question 8
+# Construct a data frame with name, home, destination for passengers whose home.dest contains both. Store only the city.
+
+# Keep only records with both home and destination. Split on " / ".
+home_dest <- data |>
+  filter(str_detect(home.dest, " / ")) |>
+  select(name, home.dest) |>
+  separate(home.dest, into = c("home", "destination"), sep = " / ")
+## Warning: Expected 2 pieces. Additional pieces discarded in 1 rows [33].
+
+home_dest
+## # A tibble: 171 x 3
+##    name                                            home              destination
+##    <chr>                                           <chr>             <chr>      
+##  1 Allison, Master. Hudson Trevor                  Montreal, PQ      Chestervil~
+##  2 Allison, Miss. Helen Loraine                    Montreal, PQ      Chestervil~
+##  3 Allison, Mr. Hudson Joshua Creighton            Montreal, PQ      Chestervil~
+##  4 Allison, Mrs. Hudson J C (Bessie Waldo Daniels) Montreal, PQ      Chestervil~
+##  5 Bjornstrom-Steffansson, Mr. Mauritz Hakan       Stockholm, Sweden Washington~
+##  6 Borebank, Mr. John James                        London            Winnipeg, ~
+##  7 Cardeza, Mr. Thomas Drake Martinez              Austria-Hungary   Germantown~
+##  8 Case, Mr. Howard Brown                          Ascot, Berkshire  Rochester,~
+##  9 Chambers, Mr. Norman Campbell                   New York, NY      Ithaca, NY 
+## 10 Chambers, Mrs. Norman Campbell (Bertha Griggs)  New York, NY      Ithaca, NY 
+## # ... with 161 more rows
+
+# Rio 2016 dataset
+
+# Load medalist dataset from Rio 2016.
+data <- read_csv("data/rio2016.csv")
+## Rows: 11538 Columns: 12
+## -- Column specification --------------------------------------------------------
+## Delimiter: ","
+## chr  (5): name, nationality, sex, sport, info
+## dbl  (6): id, height, weight, gold, silver, bronze
+## date (1): date_of_birth
+## 
+## i Use `spec()` to retrieve the full column specification for this data.
+## i Specify the column types or set `show_col_types = FALSE` to quiet this message.
+
+# Question 9
+# Did Lorenzo Cappello, Alberto Santini or Alessandro Ciancetta take part in these Olympics?
+
+# Check if any of the names appear.
+names_to_check <- c("Lorenzo Cappello", "Alberto Santini", "Alessandro Ciancetta")
+
+# maybe not in the 2016 edition...
+data |>
+  filter(name %in% names_to_check) |>
+  summarise(count = n())
+## # A tibble: 1 x 1
+##   count
+##   <int>
+## 1     0
+
+# Question 10
+# How many people took part in the swimming competition?
+
+# Count athletes listed under "aquatics".
+data |>
+  filter(sport == "aquatics") |>
+  summarise(count = n())
+## # A tibble: 1 x 1
+##   count
+##   <int>
+## 1  1445
+
+# Question 11
+# How many athletes competed in the 2016 Olympics? Create a country-level count and find the largest team.
+
+# Number of medalists listed.
+nrow(data)
+## [1] 11538
+
+# Count athletes by nationality.
+data |>
+  group_by(nationality) |>
+  summarise(count = n()) |>
+  arrange(-count)
+## # A tibble: 207 x 2
+##    nationality count
+##    <chr>       <int>
+##  1 USA           567
+##  2 BRA           485
+##  3 GER           441
+##  4 AUS           431
+##  5 FRA           410
+##  6 CHN           404
+##  7 GBR           374
+##  8 JPN           346
+##  9 CAN           321
+## 10 ESP           313
+## # ... with 197 more rows
+
+# Question 12
+# How many medals of each type were awarded? Are the counts equal? Explain.
+
+# Reshape medals to long format.
+data_long <- data |>
+  pivot_longer(
+    c("gold", "silver", "bronze"),
+    names_to = "medal",
+    values_to = "n_medals"
+  )
+
+# Total medals per type.
+data_long |>
+  group_by(medal) |>
+  summarise(count = sum(n_medals, na.rm = TRUE))
+## # A tibble: 3 x 2
+##   medal  count
+##   <chr>  <dbl>
+## 1 bronze   704
+## 2 gold     666
+## 3 silver   655
+
+# Check duplicates: these often correspond to ties.
+data |>
+  filter(duplicated(name)) |>
+  summarise(
+    gold   = sum(gold),
+    silver = sum(silver),
+    bronze = sum(bronze)
+  )
+## # A tibble: 1 x 3
+##    gold silver bronze
+##   <dbl>  <dbl>  <dbl>
+## 1     1      0      2
+
+# Question 13
+# Which athlete won the most medals? Most gold? Most silver? Most bronze among athletes with ≥ 3 medals?
+
+# Filter for gold (or other medal types).
+medal_type <- c("gold")
+
+# Remark: the `!!` notation allows to pass an external variable into dplyr verbs
+data_long |>
+  filter(medal %in% !!medal_type) |>
+  group_by(name) |>
+  summarise(count = sum(n_medals)) |>
+  arrange(desc(count))
+## # A tibble: 11,517 x 2
+##    name           count
+##    <chr>          <dbl>
+##  1 Michael Phelps     5
+##  2 Katie Ledecky      4
+##  3 Simone Biles       4
+##  4 Danuta Kozak       3
+##  5 Jason Kenny        3
+##  6 Katinka Hosszu     3
+##  7 Ryan Murphy        3
+##  8 Usain Bolt         3
+##  9 Aisen Chen         2
+## 10 Allyson Felix      2
+## # ... with 11,507 more rows
+
+# Among athletes with >=3 total medals, rank by bronze medals.
+data <- data |>
+  mutate(total_medals = gold + silver + bronze)
+
+data |>
+  filter(total_medals >= 3) |>
+  select(name, bronze) |>
+  arrange(desc(bronze))
+## # A tibble: 26 x 2
+##    name                        bronze
+##    <chr>                        <dbl>
+##  1 Andre de Grasse                  2
+##  2 Kyle Chalmers                    2
+##  3 Nathan Adrian                    2
+##  4 Penny Oleksiak                   2
+##  5 Aliya Mustafina                  1
+##  6 Dana Vollmer                     1
+##  7 Denis Abliazin                   1
+##  8 Emma McKeon                      1
+##  9 Isaquias Queiroz dos Santos      1
+## 10 Kosuke Hagino                    1
+## # ... with 16 more rows
+
+# Question 14
+# Compute athlete ages in 2016. Who was youngest? Repeat among medal winners only.
+
+# Age in 2016 based on year of birth.
+data |>
+  # we can extract the year from dates objects using lubridate::year()
+  # (the notation pkg::fun() means that function fun() is exported from package pkg)
+  mutate(age = 2016 - year(date_of_birth)) |>
+  select(name, age) |>
+  arrange(age)
+## # A tibble: 11,538 x 2
+##    name                   age
+##    <chr>                <dbl>
+##  1 Ana Iulia Dascal        14
+##  2 Darya Semyonova         14
+##  3 Fatima Alkaramova       14
+##  4 Gaurika Singh           14
+##  5 Kaya Adwoa Forson       14
+##  6 Siri Arun Budcharern    14
+##  7 Thint Myaat             14
+##  8 Yanhan Ai               14
+##  9 Ajna Kesely             15
+## 10 Anastasiya Tyurina      15
+## # ... with 11,528 more rows
+
+# Restrict to medalists.
+data |>
+  filter(total_medals > 0) |>
+  mutate(age = 2016 - year(date_of_birth)) |>
+  select(name, age) |>
+  arrange(age)
+## # A tibble: 1,857 x 2
+##    name                  age
+##    <chr>               <dbl>
+##  1 Qian Ren               15
+##  2 Angelina Melnikova     16
+##  3 Lauren Hernandez       16
+##  4 Mima Ito               16
+##  5 Penny Oleksiak         16
+##  6 Taylor Madison Ruck    16
+##  7 Amy Tinkler            17
+##  8 Aria Fischer           17
+##  9 Deanne Rose            17
+## 10 Seda Tutkhalian        17
+## # ... with 1,847 more rows
+
+# Question 15
+# Plot medal counts (gold/silver/bronze) for five countries of your choice.
+
+# set.seed() fixes the initial state of R's pseudo-random number generator so that every 
+# subsequent call to functions like rnorm(), runif(), or sample() will yield the same sequence 
+# of random numbers every time the code is executed. PRNGs are algorithms, deterministic in 
+# nature, that mimic randomness; they start from an initial value, known as the seed, and, 
+# through the use of a recurrence formula, transform it in succession so as to create numbers 
+# that appear to be random and are completely reproducible. Since the whole sequence depends 
+# on the seed, two sessions starting with the same seed will produce identical outputs, which 
+# is crucial for replicability in statistical simulations, Monte Carlo experiments, and teaching. 
+# Without setting the seed, the PRNG is initialized starting from a source of entropy that 
+# changes, like the system clock; hence, each execution would yield different results even if 
+# the code was identical.
+
+# Select five countries with at least 3 medals.
+# We pick them at random, setting a seed for reproducibility
+# In practice: after setting a seed, the sample() function will give the same results
+set.seed(123)
+countries <- sample(
+  unique(data[data$total_medals > 2, ]$nationality),
+  size = 5,
+  replace = FALSE
+)
+
+# Aggregate medals.
+data_plot <- data_long |>
+  filter(nationality %in% countries) |>
+  group_by(nationality, medal) |>
+  summarise(n_medals = sum(n_medals), .groups = "drop") |>
+  group_by(nationality) |>
+  mutate(
+    total_medals = sum(n_medals),
+    medal = factor(medal, levels = c("gold", "silver", "bronze"))
+  ) |>
+  arrange(desc(total_medals), medal)
+
+# Plot grouped bar chart.
+data_plot |>
+  # relevel factors so to ensure a nice ordering
+  mutate(nationality = factor(nationality, levels = unique(data_plot$nationality))) |>
+  ggplot(aes(x = nationality, y = n_medals, fill = medal)) +
+  geom_bar(stat = "identity", position = "dodge", color = "black") +
+  scale_fill_manual(values = c("gold", "#C0C0C0", "#CD7F32")) +
+  labs(
+    title = "Table of medals - Rio 2016",
+    x = "",
+    y = "Number of medals",
+    fill = ""
+  ) +
+  theme_minimal()
